@@ -1,1 +1,1 @@
-web: python unified.py
+web: python standalone_bot.py
