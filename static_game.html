@@ -6,7 +6,7 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>Biome World</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -56,7 +56,23 @@ html,body{width:100%;height:100%;overflow:hidden;background:#2a5030;font-family:
 #cancelBuild.show{display:block}
 #buildInfo{position:absolute;left:50%;bottom:max(58px,env(safe-area-inset-bottom)+58px);transform:translateX(-50%);display:none;pointer-events:none;text-align:center;white-space:nowrap;color:#fff;z-index:25}
 #buildInfo.show{display:block}
-@media(max-width:520px){#buildPanel{width:min(330px,calc(100vw - 64px));right:48px}.buildBtn{min-width:70px}#buildInfo{max-width:80vw;white-space:normal}}</style>
+@media(max-width:520px){#buildPanel{width:min(330px,calc(100vw - 64px));right:48px}.buildBtn{min-width:70px}#buildInfo{max-width:80vw;white-space:normal}}
+/* === MOBILE-FIRST CONTROLS === */
+html,body{#game{}}
+#game{touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+#zoomBtns button{width:52px;height:52px;font-size:24px;background:rgba(0,0,0,.45)!important;border:2px solid rgba(255,255,255,.25)!important}
+#minimap{width:120px!important;height:120px!important;bottom:max(12px,env(safe-area-inset-bottom));right:max(8px,env(safe-area-inset-right))}
+#buildToggle,#recruitBtn,#cancelBuild{min-width:48px;min-height:48px}
+#buildDrawer .buildBtn{min-height:48px;padding:12px 14px;font-size:15px}
+.hud,.panel,button{ -webkit-tap-highlight-color:transparent }
+#loading{font-size:16px}
+@media(max-width:520px){
+  #zoomBtns{bottom:max(130px,env(safe-area-inset-bottom)+120px);right:6px;gap:10px}
+  #zoomBtns button{width:56px;height:56px}
+  #minimap{width:130px!important;height:130px!important}
+}
+
+</style>
 
 <style id="rtsBuildingStyle">
 #buildingActions{position:fixed;left:50%;bottom:max(12px,env(safe-area-inset-bottom)+12px);transform:translateX(-50%);z-index:40;display:none;min-width:250px;max-width:min(420px,calc(100vw - 24px));box-sizing:border-box;padding:10px 12px;border:1px solid rgba(255,215,106,.28);border-radius:14px;background:rgba(8,12,20,.96);backdrop-filter:blur(10px);box-shadow:0 8px 28px rgba(0,0,0,.4);color:#fff}
@@ -4062,7 +4078,7 @@ canvas.addEventListener('pointermove',e=>{
   if(pointerId!==e.pointerId) return;
   const dx=e.clientX-lastPointer.x, dy=e.clientY-lastPointer.y;
   const total=Math.hypot(e.clientX-pointerStart.x,e.clientY-pointerStart.y);
-  if(pointerMode==='pending' && total>7){
+  if(pointerMode==='pending' && total>14){
     pointerMode='drag';
     moved=true;
   }
@@ -4071,7 +4087,7 @@ canvas.addEventListener('pointermove',e=>{
     cam.x-=dx/cam.zoom;
     cam.y-=dy/cam.zoom;
     clampCam();
-    suppressClickUntil=performance.now()+120;
+    suppressClickUntil=performance.now()+180;
   }
   lastPointer={x:e.clientX,y:e.clientY};
   e.preventDefault();
@@ -4088,7 +4104,7 @@ function finishPointer(e){
   pointerId=null;
   if(wasTap){
     const now=performance.now();
-    const isDouble=now-lastTapTime<360 && Math.hypot(x-lastTapX,y-lastTapY)<45;
+    const isDouble=now-lastTapTime<420 && Math.hypot(x-lastTapX,y-lastTapY)<56;
     onTap(x,y,isDouble);
   }
   e.preventDefault();
@@ -4098,6 +4114,42 @@ canvas.addEventListener('pointercancel',finishPointer,{passive:false});
 canvas.addEventListener('pointerleave',e=>{
   if(pointerId===e.pointerId && pointerMode==='drag') e.preventDefault();
 },{passive:false});
+
+
+/* === PINCH ZOOM + multi-touch camera (phone) === */
+let pinchActive=false, pinchStartDist=0, pinchStartZoom=1, pinchMid={x:0,y:0};
+function touchDist(a,b){return Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY)}
+function touchMid(a,b){return {x:(a.clientX+b.clientX)/2,y:(a.clientY+b.clientY)/2}}
+canvas.addEventListener('touchstart',e=>{
+  if(e.touches.length===2){
+    pinchActive=true;
+    pointerMode='none';
+    pointerId=null;
+    pinchStartDist=touchDist(e.touches[0],e.touches[1])||1;
+    pinchStartZoom=cam.zoom;
+    pinchMid=touchMid(e.touches[0],e.touches[1]);
+    e.preventDefault();
+  }
+},{passive:false});
+canvas.addEventListener('touchmove',e=>{
+  if(!pinchActive || e.touches.length<2) return;
+  const d=touchDist(e.touches[0],e.touches[1])||1;
+  const scale=d/pinchStartDist;
+  const z=Math.max(0.45, Math.min(2.4, pinchStartZoom*scale));
+  const mid=touchMid(e.touches[0],e.touches[1]);
+  // zoom towards midpoint
+  const wx=(mid.x-canvas.width/2)/cam.zoom+cam.x;
+  const wy=(mid.y-canvas.height/2)/cam.zoom+cam.y;
+  cam.zoom=z;
+  cam.x=wx-(mid.x-canvas.width/2)/cam.zoom;
+  cam.y=wy-(mid.y-canvas.height/2)/cam.zoom;
+  if(typeof clampCam==='function') clampCam();
+  e.preventDefault();
+},{passive:false});
+canvas.addEventListener('touchend',e=>{
+  if(e.touches.length<2) pinchActive=false;
+},{passive:false});
+canvas.addEventListener('touchcancel',()=>{pinchActive=false},{passive:false});
 
 /* Pointer events are the only world input path. This prevents duplicate touch/click commands on Android. */
 
