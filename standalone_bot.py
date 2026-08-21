@@ -1,5 +1,5 @@
 """Standalone settlement bot + static game server for Railway."""
-import asyncio, logging, os, sys, time
+import asyncio, logging, os, sys, time, urllib.request
 from pathlib import Path
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", stream=sys.stdout)
@@ -9,11 +9,29 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 PORT = int(os.environ.get("PORT", "8080"))
 PUBLIC = os.environ.get("MP_PUBLIC_URL", "").rstrip("/")
 DB_PATH = os.environ.get("DATABASE_PATH", "data/game.db")
+GAME_URL = os.environ.get("GAME_HTML_URL", "")
+
+def ensure_game():
+    sp = Path(__file__).parent / "static_game.html"
+    if sp.exists() and sp.stat().st_size > 1000:
+        return sp
+    if not GAME_URL:
+        return None
+    try:
+        log.info("Downloading game from %s", GAME_URL)
+        urllib.request.urlretrieve(GAME_URL, sp)
+        log.info("Game saved %s bytes", sp.stat().st_size)
+        return sp
+    except Exception as e:
+        log.exception("game download failed: %s", e)
+        return None
 
 async def main():
     if not BOT_TOKEN:
         raise SystemExit("BOT_TOKEN required")
     Path("data").mkdir(exist_ok=True)
+    game_path = ensure_game()
+
     import aiosqlite
     from aiohttp import web
     from aiogram import Bot, Dispatcher, F, Router
@@ -68,17 +86,17 @@ async def main():
         p = await get_player(m.from_user.id)
         if not p:
             await create_player(m.from_user.id, m.from_user.username, m.from_user.first_name)
-            await m.answer("🏕 Добро пожаловать в Поселение: Граница!", reply_markup=kb_main())
+            await m.answer("🏕 Добро пожаловать в Поселение: Граница!\n/game — RTS Biome World", reply_markup=kb_main())
         else:
             await m.answer(fmt(p), reply_markup=kb_main())
 
     @r.message(Command("game", "rts", "play"))
     async def game(m: Message):
         if not PUBLIC:
-            await m.answer("Игра скоро будет доступна"); return
+            await m.answer("Поставь MP_PUBLIC_URL в Railway Variables"); return
         url = f"{PUBLIC}/sp"
-        kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🎮 Открыть", url=url)]])
-        await m.answer("🌍 Biome World", reply_markup=kb)
+        kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🎮 Открыть Biome World", url=url)]])
+        await m.answer("🌍 Biome World — одиночная RTS", reply_markup=kb)
 
     @r.callback_query(F.data == "status")
     async def st(c: CallbackQuery):
@@ -99,20 +117,26 @@ async def main():
     await db_init()
 
     async def health(_):
-        return web.json_response({"ok": True})
+        return web.json_response({"ok": True, "game": bool(game_path and Path(game_path).exists())})
+
     app = web.Application()
     app.router.add_get("/health", health)
     sp = Path(__file__).parent / "static_game.html"
     if sp.exists():
         app.router.add_get("/sp", lambda r: web.FileResponse(sp))
         app.router.add_get("/", lambda r: web.FileResponse(sp))
+    else:
+        async def no_game(_):
+            return web.Response(text="Game file missing. Upload static_game.html to the repo or set GAME_HTML_URL.", status=404)
+        app.router.add_get("/sp", no_game)
+
     runner = web.AppRunner(app)
     await runner.setup()
     await web.TCPSite(runner, "0.0.0.0", PORT).start()
-    log.info("HTTP :%s", PORT)
+    log.info("HTTP :%s game=%s", PORT, bool(sp.exists()))
 
     me = await bot.get_me()
-    log.info("Bot @%s", me.username)
+    log.info("Bot @%s public=%s", me.username, PUBLIC)
     await bot.delete_webhook(drop_pending_updates=False)
     await dp.start_polling(bot)
 
